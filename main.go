@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -19,20 +20,45 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type NoOpWriter struct {
+	io.ReadCloser
+}
+
+func (c NoOpWriter) Write([]byte) (int, error) {
+	return 0, nil
+}
 func ptyHandler(w http.ResponseWriter, r *http.Request) {
+	debug := true
+	fmt.Println("DEBUG IS: ", debug)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Upgrade failed: %s", err)
 		return
 	}
 	defer conn.Close()
+	// You really want to set PYTHONUNBUFFERED=1, otherwise you'll lose 8 hours
 	c := exec.Command("python3", "pystuff/main.py")
-	cPty, err := pty.Start(c)
-	if err != nil {
-		fmt.Printf("Error starting websocket: %s", err)
-		return
+	var cPty io.ReadWriteCloser
+	if debug {
+		cPty, err = pty.Start(c)
+		if err != nil {
+			fmt.Printf("Error starting websocket: %s", err)
+			return
+		}
+	} else {
+		stdout, err := c.StdoutPipe()
+		if err != nil {
+			fmt.Printf("Error starting websocket: %s", err)
+			return
+		}
+		starterr := c.Start()
+		if starterr != nil {
+			fmt.Printf("Error starting websocket: %s", err)
+			return
+		}
+		cPty = NoOpWriter{stdout}
 	}
-	defer cPty.Close()
+	// defer cPty.Close()
 	var done bool
 	go func() {
 		buf := make([]byte, 128)
@@ -48,7 +74,9 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			err = conn.WriteMessage(websocket.TextMessage, buf[0:n])
+			// For some reason, the StdoutPipe doesn't have \r\n, but only \n, which breaks the xterm render
+			data := bytes.Replace(buf[0:n], []byte{10}, []byte{13, 10}, -1)
+			err = conn.WriteMessage(websocket.TextMessage, data)
 			if err != nil {
 				fmt.Printf("Failed writing to ws: %s", err)
 				continue
@@ -56,30 +84,24 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		done = true
 	}()
-
-	for !done {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("Failed to read message: ", err)
-			// Just keep going boys
-			break
+	if debug {
+		for !done {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				log.Println("Failed to read message: ", err)
+				// Just keep going boys
+				break
+			}
+			_, err = cPty.Write(message)
+			if err != nil {
+				log.Println("Failed to write to webscoket, error:", err)
+				continue
+			}
 		}
-		_, err = cPty.Write(message)
-
-		if err != nil {
-			log.Println("Failed to write to webscoket, error:", err)
-			continue
-		}
+	} else {
+		c.Wait()
 	}
 
-}
-
-func test() (err error) {
-	// Create arbitrary command.
-	c := exec.Command("python3", "main.py")
-	c.Start()
-	err = c.Wait()
-	return
 }
 
 func main() {
