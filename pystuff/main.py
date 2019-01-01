@@ -8,7 +8,6 @@ class Foo:
             print(str(x) + " foobar")
             time.sleep(1)
         if not self.done:
-            # import pdb; pdb.set_trace()
             self.done = True
             return "Hello World!"
         else:

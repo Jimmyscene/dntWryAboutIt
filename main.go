@@ -1,13 +1,14 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os/exec"
-	"io"
+
 	"github.com/gorilla/websocket"
 	"github.com/kr/pty"
-	"fmt"
 )
 
 var upgrader = websocket.Upgrader{
@@ -17,16 +18,8 @@ var upgrader = websocket.Upgrader{
 		return true
 	},
 }
-type NoOpWrite struct {
-	io.ReadCloser
-}
-func (n NoOpWrite) Write([]byte) (int,  error) {
-	return 0, nil
-}
 
-func ptyHandler(w http.ResponseWriter, r *http.Request)  {
-	fmt.Println("Starting new pty")
-	debug := false
+func ptyHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Upgrade failed: %s", err)
@@ -34,37 +27,23 @@ func ptyHandler(w http.ResponseWriter, r *http.Request)  {
 	}
 	defer conn.Close()
 	c := exec.Command("python3", "pystuff/main.py")
-	var cPty io.ReadWriteCloser
-	if debug {
-		cPty, err = pty.Start(c)
-	} else {
-		ccPty, pipeerr := c.StdoutPipe()
-		err = c.Start()
-		if pipeerr != nil {
-			fmt.Printf("Error getting stdoutPipe: %s\n", pipeerr.Error())
-		}
-		cPty = NoOpWrite{ccPty}
-	}
+	cPty, err := pty.Start(c)
 	if err != nil {
 		fmt.Printf("Error starting websocket: %s", err)
 		return
 	}
 	defer cPty.Close()
+	var done bool
 	go func() {
-		fmt.Println("In the goloop")
 		buf := make([]byte, 128)
 		for {
-			fmt.Println("Reading stuff")
 			n, err := cPty.Read(buf)
-			fmt.Println(n)
-			fmt.Println(string(buf))
 			if err != nil {
-				fmt.Println("Error: " + err.Error())
 				if err == io.EOF {
-					conn.WriteMessage(websocket.TextMessage, []byte("Script Exited. Terminating Connection"))
+					conn.WriteMessage(websocket.TextMessage, []byte("\nScript Exited. Terminating Connection\n"))
 					break
 				} else {
-					conn.WriteMessage(websocket.TextMessage, []byte("Failed to read buffer: "+ err.Error()))
+					conn.WriteMessage(websocket.TextMessage, []byte("Failed to read buffer: "+err.Error()))
 					fmt.Printf("Failed to read buffer: %s", err)
 					break
 				}
@@ -75,29 +54,25 @@ func ptyHandler(w http.ResponseWriter, r *http.Request)  {
 				continue
 			}
 		}
+		done = true
 	}()
-	if debug {
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				log.Printf("Failed to read message: %s", err)
-				// Just keep going boys
-				continue
-			}
-			_, err = cPty.Write(message)
 
-			if err != nil {
-				log.Println("write:", err)
-				continue
-			}
+	for !done {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Failed to read message: ", err)
+			// Just keep going boys
+			break
 		}
-	} else {
-		for {}
+		_, err = cPty.Write(message)
+
+		if err != nil {
+			log.Println("Failed to write to webscoket, error:", err)
+			continue
+		}
 	}
 
-
 }
-
 
 func test() (err error) {
 	// Create arbitrary command.
@@ -109,8 +84,6 @@ func test() (err error) {
 
 func main() {
 	http.HandleFunc("/pty", ptyHandler)
-	http.ListenAndServe("localhost:9000", nil)
-	if err := test(); err != nil {
-		log.Fatal(err)
-	}
+	fmt.Println("Serving On localhost:9000")
+	fmt.Println(http.ListenAndServe("localhost:9000", nil))
 }
