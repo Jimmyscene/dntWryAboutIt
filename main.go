@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os/exec"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/kr/pty"
 )
@@ -28,7 +29,12 @@ func (c NoOpWriter) Write([]byte) (int, error) {
 	return 0, nil
 }
 func ptyHandler(w http.ResponseWriter, r *http.Request) {
-	debug := true
+	var debug bool
+	if mux.Vars(r)["debug"] == "true" {
+		debug = true
+	} else {
+		debug = false
+	}
 	fmt.Println("DEBUG IS: ", debug)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -75,6 +81,7 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			// For some reason, the StdoutPipe doesn't have \r\n, but only \n, which breaks the xterm render
+			// TODO: Should probably check to see if byte already has the \r before the \n, but adding it doesn't appear to break anything
 			data := bytes.Replace(buf[0:n], []byte{10}, []byte{13, 10}, -1)
 			err = conn.WriteMessage(websocket.TextMessage, data)
 			if err != nil {
@@ -105,7 +112,9 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/pty", ptyHandler)
+	var router = mux.NewRouter()
+	router.Path("/pty").Queries("debug", "{debug}").HandlerFunc(ptyHandler)
+	// http.HandleFunc("/pty", ptyHandler)
 	fmt.Println("Serving On localhost:9000")
-	fmt.Println(http.ListenAndServe("localhost:9000", nil))
+	fmt.Println(http.ListenAndServe("localhost:9000", router))
 }
