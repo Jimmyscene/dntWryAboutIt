@@ -2,7 +2,7 @@ version: '3'
 services:
     goapp:
         build:
-            context: .
+            context: gostuff
         ports:
             - 9000:9000
     ui:
