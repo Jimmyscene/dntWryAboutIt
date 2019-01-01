@@ -94,17 +94,12 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 		cPty = NoOpWriter{stdout}
 	}
 	defer cPty.Close()
-	var done bool
-	go func() {
-		buf := make([]byte, 128)
-		for {
-			n, err := cPty.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					break
-				} else {
-					conn.WriteMessage(websocket.TextMessage, []byte("Failed to read buffer: "+err.Error()))
-					fmt.Printf("Failed to read buffer: %s", err)
+	if debug {
+		go func() {
+			for {
+				_, message, err := conn.ReadMessage()
+				if err != nil {
+					log.Println("Failed to read message: ", err)
 					fmt.Println("Terminating Process...")
 					err := c.Process.Kill()
 					if err != nil {
@@ -112,23 +107,24 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 					}
 					break
 				}
+				_, err = cPty.Write(message)
+				if err != nil {
+					log.Println("Failed to write to webscoket, error:", err)
+					continue
+				}
 			}
-			// For some reason, the StdoutPipe doesn't have \r\n, but only \n, which breaks the xterm render
-			// TODO: Should probably check to see if byte already has the \r before the \n, but adding it doesn't appear to break anything
-			data := bytes.Replace(buf[0:n], []byte{10}, []byte{13, 10}, -1)
-			err = conn.WriteMessage(websocket.TextMessage, data)
-			if err != nil {
-				fmt.Printf("Failed writing to ws: %s", err)
-				continue
-			}
-		}
-		done = true
-	}()
-	if debug {
-		for !done {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				log.Println("Failed to read message: ", err)
+		}()
+	}
+
+	buf := make([]byte, 128)
+	for {
+		n, err := cPty.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				conn.WriteMessage(websocket.TextMessage, []byte("Failed to read buffer: "+err.Error()))
+				fmt.Printf("Failed to read buffer: %s", err)
 				fmt.Println("Terminating Process...")
 				err := c.Process.Kill()
 				if err != nil {
@@ -136,11 +132,14 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				break
 			}
-			_, err = cPty.Write(message)
-			if err != nil {
-				log.Println("Failed to write to webscoket, error:", err)
-				continue
-			}
+		}
+		// For some reason, the StdoutPipe doesn't have \r\n, but only \n, which breaks the xterm render
+		// TODO: Should probably check to see if byte already has the \r before the \n, but adding it doesn't appear to break anything
+		data := bytes.Replace(buf[0:n], []byte{10}, []byte{13, 10}, -1)
+		err = conn.WriteMessage(websocket.TextMessage, data)
+		if err != nil {
+			fmt.Printf("Failed writing to ws: %s", err)
+			continue
 		}
 	}
 	if err := c.Wait(); err != nil {
@@ -162,9 +161,8 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Fatalf("cmd.Wait: %v", err)
 		}
-	} else {
-		log.Println("HELLO?")
 	}
+
 }
 
 func getFileHandler(w http.ResponseWriter, r *http.Request) {

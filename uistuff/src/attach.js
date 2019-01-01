@@ -1,3 +1,5 @@
+// I stole this from https://github.com/krasimir/evala
+
 Object.defineProperty(exports, '__esModule', { value: true });
 
 function attach(term, socket, bidirectional, buffered) {

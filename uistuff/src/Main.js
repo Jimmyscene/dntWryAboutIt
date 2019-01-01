@@ -23,7 +23,8 @@ class Main extends Component {
     this.state = {
       'activeStep': 0,
       'debug': false,
-      'activeSocket': null
+      'activeSocket': null,
+      'result': -1
       // 'initialized': false
     }
     this.setActiveStep = this.setActiveStep.bind(this)
@@ -42,11 +43,6 @@ class Main extends Component {
       ...prevState, debug: val
     }))
   }
-  // setInitialized(val) {
-    // this.setState((prevState, prevProps) =>  ({
-      // ...prevState, initialized: val
-    // }))
-  // }
   runThings() {
     const term = this.refs.xterm.getTerminal()
     term.clear()
@@ -57,7 +53,9 @@ class Main extends Component {
     var socket = new WebSocket('ws://localhost:9000/pty?debug=' + this.state.debug);
     this.setActiveStep(1)
     socket.onclose = (e) => {
+      console.log(e)
       term.write("Connection closed: " + e.reason + "\r\n");
+
       this.setActiveStep(2)
     }
     term.attach(socket)
@@ -74,7 +72,7 @@ class Main extends Component {
         />
         <div className="row">
           <div className="column">
-           <App debug={this.state.debug} debugHandler={this.setDebug} initailizedHandler={this.runThings}/>
+           <App result={this.state.result} debug={this.state.debug} debugHandler={this.setDebug} initailizedHandler={this.runThings}/>
           </div>
           <div className="column">
               <Code debug={this.state.debug} />
