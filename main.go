@@ -43,7 +43,6 @@ func getDebug(r *http.Request) bool {
 	} else {
 		debug = false
 	}
-	fmt.Println("DEBUG IS: ", debug)
 	return debug
 }
 
@@ -72,7 +71,7 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	// You really want to set PYTHONUNBUFFERED=1, otherwise you'll lose 8 hours
-	c := exec.Command("python3", getFile(debug))
+	c := exec.Command("python", getFile(debug))
 	var cPty io.ReadWriteCloser
 	if debug {
 		cPty, err = pty.Start(c)
@@ -88,7 +87,7 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		starterr := c.Start()
 		if starterr != nil {
-			fmt.Printf("Error starting websocket: %s", err)
+			fmt.Printf("Error starting websocket: %s", starterr)
 			return
 		}
 		cPty = NoOpWriter{stdout}
