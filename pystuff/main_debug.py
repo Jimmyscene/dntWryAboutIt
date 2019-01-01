@@ -7,6 +7,7 @@ class Foo:
     def hello(self):
         for x in range(10):
             print(str(x) + " foobar")
+            import pdb; pdb.set_trace()
             time.sleep(1)
         if not self.done:
             self.done = True

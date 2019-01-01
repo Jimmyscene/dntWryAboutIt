@@ -2,16 +2,23 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os/exec"
+	"syscall"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/kr/pty"
 )
+
+type FileData struct {
+	Data string `json:"data"`
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -28,7 +35,8 @@ type NoOpWriter struct {
 func (c NoOpWriter) Write([]byte) (int, error) {
 	return 0, nil
 }
-func ptyHandler(w http.ResponseWriter, r *http.Request) {
+
+func getDebug(r *http.Request) bool {
 	var debug bool
 	if mux.Vars(r)["debug"] == "true" {
 		debug = true
@@ -36,6 +44,27 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 		debug = false
 	}
 	fmt.Println("DEBUG IS: ", debug)
+	return debug
+}
+
+func getFile(debug bool) string {
+	if debug {
+		return "pystuff/main_debug.py"
+	} else {
+		return "pystuff/main.py"
+	}
+}
+
+func getContents(filepath string) []byte {
+	dat, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		panic(err)
+	}
+	return dat
+}
+
+func ptyHandler(w http.ResponseWriter, r *http.Request) {
+	debug := getDebug(r)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Upgrade failed: %s", err)
@@ -43,7 +72,7 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	// You really want to set PYTHONUNBUFFERED=1, otherwise you'll lose 8 hours
-	c := exec.Command("python3", "pystuff/main.py")
+	c := exec.Command("python3", getFile(debug))
 	var cPty io.ReadWriteCloser
 	if debug {
 		cPty, err = pty.Start(c)
@@ -64,7 +93,7 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		cPty = NoOpWriter{stdout}
 	}
-	// defer cPty.Close()
+	defer cPty.Close()
 	var done bool
 	go func() {
 		buf := make([]byte, 128)
@@ -72,7 +101,6 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 			n, err := cPty.Read(buf)
 			if err != nil {
 				if err == io.EOF {
-					conn.WriteMessage(websocket.TextMessage, []byte("\nScript Exited. Terminating Connection\n"))
 					break
 				} else {
 					conn.WriteMessage(websocket.TextMessage, []byte("Failed to read buffer: "+err.Error()))
@@ -96,7 +124,6 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 			_, message, err := conn.ReadMessage()
 			if err != nil {
 				log.Println("Failed to read message: ", err)
-				// Just keep going boys
 				break
 			}
 			_, err = cPty.Write(message)
@@ -105,16 +132,48 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-	} else {
-		c.Wait()
 	}
+	if err := c.Wait(); err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			// The program has exited with an exit code != 0
 
+			// This works on both Unix and Windows. Although package
+			// syscall is generally platform dependent, WaitStatus is
+			// defined for both Unix and Windows and in both cases has
+			// an ExitStatus() method with the same signature.
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(
+						int(status), "Script Exited. Terminating Connection",
+					),
+				)
+				conn.Close()
+			}
+		} else {
+			log.Fatalf("cmd.Wait: %v", err)
+		}
+	} else {
+		log.Println("HELLO?")
+	}
+}
+
+func getFileHandler(w http.ResponseWriter, r *http.Request) {
+	filedata := getContents(getFile(getDebug(r)))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	file := FileData{string(filedata)}
+	str, err := json.Marshal(&file)
+	if err != nil {
+		panic(err)
+	}
+	w.Write(str)
 }
 
 func main() {
 	var router = mux.NewRouter()
 	router.Path("/pty").Queries("debug", "{debug}").HandlerFunc(ptyHandler)
+	router.Path("/file").Queries("debug", "{debug}").HandlerFunc(getFileHandler)
 	// http.HandleFunc("/pty", ptyHandler)
 	fmt.Println("Serving On localhost:9000")
-	fmt.Println(http.ListenAndServe("localhost:9000", router))
+	fmt.Println(http.ListenAndServe("0.0.0.0:9000", router))
 }

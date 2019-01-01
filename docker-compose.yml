@@ -1,0 +1,12 @@
+version: '3'
+services:
+    goapp:
+        build:
+            context: .
+        ports:
+            - 9000:9000
+    ui:
+        build:
+            context: uistuff
+        ports:
+            - 3000:3000
