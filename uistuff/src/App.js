@@ -19,12 +19,13 @@ class App extends Component {
       typography: { useNextVariants: true },
     });
 
-
+    console.log(this.props)
+    const color = this.props.debug ? 'yellow' : "#61DAFB"
     return (
       <div className="App">
       <MuiThemeProvider theme={theme}>
       <div className="App-header">
-            {Logo("#61DAFB")}
+            {Logo(color)}
             <FormGroup row>
               <FormControlLabel
                 control={

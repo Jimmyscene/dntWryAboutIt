@@ -105,6 +105,11 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 				} else {
 					conn.WriteMessage(websocket.TextMessage, []byte("Failed to read buffer: "+err.Error()))
 					fmt.Printf("Failed to read buffer: %s", err)
+					fmt.Println("Terminating Process...")
+					err := c.Process.Kill()
+					if err != nil {
+						fmt.Println("Error terminating process: ", err)
+					}
 					break
 				}
 			}
@@ -124,6 +129,11 @@ func ptyHandler(w http.ResponseWriter, r *http.Request) {
 			_, message, err := conn.ReadMessage()
 			if err != nil {
 				log.Println("Failed to read message: ", err)
+				fmt.Println("Terminating Process...")
+				err := c.Process.Kill()
+				if err != nil {
+					fmt.Println("Error terminating process: ", err)
+				}
 				break
 			}
 			_, err = cPty.Write(message)
